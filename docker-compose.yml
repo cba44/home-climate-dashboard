@@ -1,0 +1,31 @@
+# This file shows the service block to add to your existing docker-compose.yml on the Pi.
+#
+# Option A: Named network (if your mosquitto service uses a named network)
+#   Set MQTT_HOST to the mosquitto service name — Docker resolves it via internal DNS.
+#
+# Option B: Host networking (simpler — use this if unsure)
+#   Uncomment network_mode: host and change MQTT_HOST to localhost.
+#   Remove the ports: and networks: blocks in that case.
+
+services:
+  zigbee-dashboard:
+    image: zigbee-dashboard:latest
+    container_name: zigbee-dashboard
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - MQTT_HOST=mosquitto     # Use Docker service name (Option A)
+      # - MQTT_HOST=localhost   # Uncomment for host networking (Option B)
+      - MQTT_PORT=1883
+      - NODE_ENV=production
+    depends_on:
+      - mosquitto
+
+  # ─── Your existing services below ─────────────────────────────────────────
+  # mosquitto:
+  #   image: eclipse-mosquitto
+  #   ...
