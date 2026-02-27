@@ -104,10 +104,7 @@ export function SensorCard({ room, reading }: Props) {
             {getTempEmoji(reading.temperature)}
           </span>
           <span
-            className={clsx(
-              'text-2xl font-bold tabular-nums',
-              getTempColor(reading.temperature)
-            )}
+            className={`text-2xl font-bold tabular-nums ${getTempColor(reading.temperature)}`}
           >
             {reading.temperature.toFixed(1)}°C
           </span>
