@@ -13,10 +13,14 @@ const mqttPort = parseInt(process.env.MQTT_PORT || '1883', 10);
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-// In-memory cache of the latest reading per room.
-// Key: room name (friendly_name from MQTT topic, e.g. "living-room")
-// Value: SensorReading + lastUpdated
+// Climate sensor cache: key = "climate-kitchen", value = SensorReading
 const sensorCache = new Map();
+
+// Bulb state cache: key = "kitchen" (no prefix), value = BulbState
+const bulbCache = new Map();
+
+// Bulb capabilities: key = "kitchen", value = { minColorTemp, maxColorTemp } | null
+const bulbCapabilities = new Map();
 
 // Set of connected WebSocket clients
 const clients = new Set();
@@ -31,18 +35,14 @@ function broadcast(message) {
 }
 
 app.prepare().then(() => {
-  // 1. Create the HTTP server (not listening yet)
   const httpServer = http.createServer((req, res) => {
     handle(req, res);
   });
 
-  // 2. Create WebSocket server in noServer mode, then manually route upgrades.
-  //    This prevents the wss from intercepting Next.js HMR WebSocket connections
-  //    (/_next/webpack-hmr) which would break hot reload in development.
+  // Use noServer mode to avoid intercepting Next.js HMR upgrades
   const wss = new WebSocket.Server({ noServer: true });
 
-  // Only handle upgrades to /ws — our dedicated sensor WebSocket path.
-  // All other upgrades (/_next/webpack-hmr, etc.) are left entirely for Next.js.
+  // Only handle upgrades to /ws — our dedicated sensor WebSocket path
   httpServer.on('upgrade', (request, socket, head) => {
     const { pathname } = new URL(request.url, `http://${request.headers.host}`);
     if (pathname === '/ws') {
@@ -55,13 +55,28 @@ app.prepare().then(() => {
   wss.on('connection', (ws) => {
     clients.add(ws);
 
-    // Send a full snapshot of current state immediately so the browser
-    // doesn't show blank cards until the next MQTT message arrives.
-    const snapshot = {};
-    for (const [room, data] of sensorCache) {
-      snapshot[room] = data;
-    }
-    ws.send(JSON.stringify({ type: 'snapshot', data: snapshot }));
+    // Send full snapshot immediately so browser doesn't show blank cards
+    ws.send(JSON.stringify({
+      type: 'snapshot',
+      data: Object.fromEntries(sensorCache),
+      bulbs: Object.fromEntries(bulbCache),
+      capabilities: Object.fromEntries(bulbCapabilities),
+    }));
+
+    // Receive commands from the browser (e.g. bulb toggle/brightness)
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'bulb-command' && msg.room && msg.command) {
+          mqttClient.publish(
+            `zigbee2mqtt/bulb-${msg.room}/set`,
+            JSON.stringify(msg.command)
+          );
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    });
 
     ws.on('close', () => {
       clients.delete(ws);
@@ -77,7 +92,7 @@ app.prepare().then(() => {
     console.error('[WS] server error:', err.message);
   });
 
-  // 3. Connect to MQTT broker
+  // Connect to MQTT broker
   const mqttClient = mqtt.connect(`mqtt://${mqttHost}:${mqttPort}`, {
     clientId: `zigbee-dashboard-${Math.random().toString(16).slice(2, 8)}`,
     keepalive: 60,
@@ -86,53 +101,80 @@ app.prepare().then(() => {
 
   mqttClient.on('connect', () => {
     console.log(`[MQTT] connected to ${mqttHost}:${mqttPort}`);
-    // Subscribe to all device topics (+ = single-level wildcard)
-    mqttClient.subscribe('zigbee2mqtt/+', (err) => {
-      if (err) {
-        console.error('[MQTT] subscribe error:', err.message);
-      } else {
-        console.log('[MQTT] subscribed to zigbee2mqtt/+');
-      }
-    });
+    // bridge/devices is retained — delivered immediately, contains bulb capabilities
+    mqttClient.subscribe('zigbee2mqtt/bridge/devices');
+    mqttClient.subscribe('zigbee2mqtt/+');
   });
 
   mqttClient.on('message', (topic, payload) => {
     try {
-      // Only handle device topics — exactly 2 segments: "zigbee2mqtt/{room}"
-      // Skip bridge topics like "zigbee2mqtt/bridge/state", "zigbee2mqtt/bridge/devices", etc.
+      // Parse device capabilities from bridge/devices (retained message)
+      if (topic === 'zigbee2mqtt/bridge/devices') {
+        const devices = JSON.parse(payload.toString());
+        for (const device of devices) {
+          const name = device.friendly_name;
+          if (!name || !name.startsWith('bulb-')) continue;
+          const room = name.replace(/^bulb-/, '');
+          const lightFeature = device.definition?.exposes?.find(e => e.type === 'light');
+          const colorTempFeature = lightFeature?.features?.find(f => f.name === 'color_temp');
+          bulbCapabilities.set(
+            room,
+            colorTempFeature
+              ? { minColorTemp: colorTempFeature.value_min, maxColorTemp: colorTempFeature.value_max }
+              : null
+          );
+        }
+        // Re-broadcast snapshot so connected clients get updated capabilities
+        broadcast({
+          type: 'snapshot',
+          data: Object.fromEntries(sensorCache),
+          bulbs: Object.fromEntries(bulbCache),
+          capabilities: Object.fromEntries(bulbCapabilities),
+        });
+        return;
+      }
+
+      // Only handle single-level device topics: "zigbee2mqtt/{device}"
       const parts = topic.split('/');
       if (parts.length !== 2) return;
 
-      const room = parts[1];
-
-      // Only process climate sensors (e.g. "climate-kitchen", "climate-bedroom")
-      if (!room.startsWith('climate-')) return;
+      const device = parts[1];
       const data = JSON.parse(payload.toString());
 
-      // Guard: only process if this looks like a sensor reading
-      if (typeof data.temperature === 'undefined') return;
+      // Handle bulb state updates
+      if (device.startsWith('bulb-')) {
+        const room = device.replace(/^bulb-/, '');
+        const bulbState = {
+          state: data.state ?? 'OFF',
+          brightness: data.brightness ?? 254,
+          color_temp: data.color_temp ?? null,
+        };
+        bulbCache.set(room, bulbState);
+        broadcast({ type: 'bulb-update', room, data: bulbState });
+        return;
+      }
 
-      const reading = {
-        temperature: data.temperature,
-        humidity: data.humidity ?? null,
-        battery: data.battery ?? null,
-        voltage: data.voltage ?? null,
-        linkquality: data.linkquality ?? null,
-        lastUpdated: new Date().toISOString(),
-      };
-
-      sensorCache.set(room, reading);
-
-      broadcast({ type: 'update', room, data: reading });
+      // Handle climate sensor updates
+      if (device.startsWith('climate-')) {
+        if (typeof data.temperature === 'undefined') return;
+        const reading = {
+          temperature: data.temperature,
+          humidity: data.humidity ?? null,
+          battery: data.battery ?? null,
+          voltage: data.voltage ?? null,
+          linkquality: data.linkquality ?? null,
+          lastUpdated: new Date().toISOString(),
+        };
+        sensorCache.set(device, reading);
+        broadcast({ type: 'update', room: device, data: reading });
+      }
     } catch (err) {
-      // Malformed JSON or unexpected payload — ignore silently
       console.warn('[MQTT] failed to parse message on topic', topic, err.message);
     }
   });
 
   mqttClient.on('error', (err) => {
     console.error('[MQTT] error:', err.message);
-    // mqtt@5 handles reconnect automatically — no manual retry needed
   });
 
   mqttClient.on('reconnect', () => {
@@ -143,7 +185,6 @@ app.prepare().then(() => {
     console.warn('[MQTT] offline');
   });
 
-  // 4. Start listening — must be last, after WS and MQTT are set up
   httpServer.listen(port, () => {
     console.log(`[Server] ready on http://localhost:${port}`);
   });

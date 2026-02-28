@@ -1,27 +1,36 @@
 'use client';
 
-import { useEffect, useReducer, useRef } from 'react';
-import type { ConnectionStatus, SensorMap, WsMessage } from '@/types/sensor';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
+import type {
+  BulbCapabilitiesMap,
+  BulbCommand,
+  BulbMap,
+  ConnectionStatus,
+  SensorMap,
+  WsMessage,
+} from '@/types/sensor';
 
 type State = {
   sensors: SensorMap;
+  bulbs: BulbMap;
+  capabilities: BulbCapabilitiesMap;
   status: ConnectionStatus;
 };
 
 type Action =
-  | { type: 'SNAPSHOT'; data: SensorMap }
+  | { type: 'SNAPSHOT'; data: SensorMap; bulbs: BulbMap; capabilities: BulbCapabilitiesMap }
   | { type: 'UPDATE'; room: string; data: State['sensors'][string] }
+  | { type: 'BULB_UPDATE'; room: string; data: BulbMap[string] }
   | { type: 'SET_STATUS'; status: ConnectionStatus };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'SNAPSHOT':
-      return { ...state, sensors: action.data };
+      return { ...state, sensors: action.data, bulbs: action.bulbs, capabilities: action.capabilities };
     case 'UPDATE':
-      return {
-        ...state,
-        sensors: { ...state.sensors, [action.room]: action.data },
-      };
+      return { ...state, sensors: { ...state.sensors, [action.room]: action.data } };
+    case 'BULB_UPDATE':
+      return { ...state, bulbs: { ...state.bulbs, [action.room]: action.data } };
     case 'SET_STATUS':
       return { ...state, status: action.status };
     default:
@@ -29,9 +38,13 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-const INITIAL_STATE: State = { sensors: {}, status: 'connecting' };
+const INITIAL_STATE: State = {
+  sensors: {},
+  bulbs: {},
+  capabilities: {},
+  status: 'connecting',
+};
 
-// Exponential backoff: 1s, 2s, 4s, 8s, ..., max 30s
 const BACKOFF_DELAYS = [1000, 2000, 4000, 8000, 16000, 30000];
 
 export function useSensorWebSocket() {
@@ -56,10 +69,7 @@ export function useSensorWebSocket() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (unmountedRef.current) {
-          ws.close();
-          return;
-        }
+        if (unmountedRef.current) { ws.close(); return; }
         retryCountRef.current = 0;
         dispatch({ type: 'SET_STATUS', status: 'connected' });
       };
@@ -69,9 +79,11 @@ export function useSensorWebSocket() {
         try {
           const msg: WsMessage = JSON.parse(event.data as string);
           if (msg.type === 'snapshot') {
-            dispatch({ type: 'SNAPSHOT', data: msg.data });
+            dispatch({ type: 'SNAPSHOT', data: msg.data, bulbs: msg.bulbs, capabilities: msg.capabilities });
           } else if (msg.type === 'update') {
             dispatch({ type: 'UPDATE', room: msg.room, data: msg.data });
+          } else if (msg.type === 'bulb-update') {
+            dispatch({ type: 'BULB_UPDATE', room: msg.room, data: msg.data });
           }
         } catch {
           // Ignore malformed messages
@@ -113,5 +125,17 @@ export function useSensorWebSocket() {
     };
   }, []);
 
-  return { sensors: state.sensors, status: state.status };
+  const sendBulbCommand = useCallback((room: string, command: BulbCommand) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'bulb-command', room, command }));
+    }
+  }, []);
+
+  return {
+    sensors: state.sensors,
+    bulbs: state.bulbs,
+    capabilities: state.capabilities,
+    status: state.status,
+    sendBulbCommand,
+  };
 }

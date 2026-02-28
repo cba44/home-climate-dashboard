@@ -1,23 +1,26 @@
 # Home Climate Dashboard
 
-Live temperature and humidity monitoring for your home, powered by Zigbee sensors, MQTT, and Next.js.
+Live temperature, humidity, and light control dashboard for your home, powered by Zigbee sensors, IKEA bulbs, MQTT, and Next.js.
 
 ## Overview
 
 ```
 Sonoff SNZB-02 sensors → zigbee2mqtt → Mosquitto MQTT → server.js → Browser
+IKEA bulbs             ↗                                           ↘ controls
 ```
 
-- Reads live data from Sonoff SNZB-02/SNZB-02D sensors via zigbee2mqtt
+- Reads live temperature and humidity from Sonoff SNZB-02/SNZB-02D sensors
+- Controls IKEA bulbs (on/off, brightness, optional color temperature) from the same card
+- Bulb capabilities (color temperature support) auto-detected from zigbee2mqtt — no hardcoding
 - A custom Node.js server bridges MQTT to the browser over WebSocket (port 3000)
 - No database — live readings only, held in memory
-- Responsive card grid with temperature/humidity emojis, battery level, signal strength, and climate advice
 
 ## Prerequisites
 
 - Node.js 22+
 - Raspberry Pi running **zigbee2mqtt** and **Mosquitto** via Docker
-- Sensors paired in zigbee2mqtt with friendly names matching your room names (e.g. `living-room`, `bedroom-1`)
+- Climate sensors paired in zigbee2mqtt with friendly names `climate-{room}` (e.g. `climate-kitchen`, `climate-living-room`)
+- IKEA bulbs paired with friendly names `bulb-{room}` matching the same room (e.g. `bulb-kitchen`, `bulb-living-room`)
 
 ## Local Development
 
@@ -98,14 +101,16 @@ docker compose up -d zigbee-dashboard
 
 ## Sensor Card Features
 
-| Indicator      | Details                                                     |
-| -------------- | ----------------------------------------------------------- |
-| Temperature    | 🥶 <16° · 🧥 16–18° · 😊 19–24° · 😅 25–28° · 🥵 >28°       |
-| Humidity       | 🏜️ <30% · 😐 30–39% · 😊 40–60% · 😅 61–70% · 💧 >70%       |
-| Battery        | Color-coded: green ≥50% · yellow ≥20% · red <20%            |
-| Signal         | LQI as percentage                                           |
-| Stale sensor   | Amber border when no update for 5+ minutes                  |
-| Climate advice | Contextual tips shown when temp or humidity is out of range |
+| Indicator      | Details                                                                |
+| -------------- | ---------------------------------------------------------------------- |
+| Temperature    | ❄️ <16° · 🥶 16–18° · 😊 19–24° · 🥵 25–28° · 🔥 >28°                  |
+| Humidity       | 🏜️ <30% · 😐 30–39% · 😊 40–60% · 😓 61–70% · 💧 >70%                  |
+| Battery        | Color-coded: green ≥50% · yellow ≥20% · red <20%                      |
+| Signal         | LQI as percentage                                                      |
+| Climate advice | Contextual tips shown when temp or humidity is out of range            |
+| Light on/off   | Toggle switch per room (shown when a `bulb-{room}` is paired)          |
+| Brightness     | Slider 0–100% (shown when the light is on)                             |
+| Color temp     | Cool → warm slider (shown only on bulbs that support color temperature) |
 
 ## Configuration
 
