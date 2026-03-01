@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import { Wifi, Battery, Clock, AlertTriangle, Lightbulb } from "lucide-react";
-import type {
-  BulbCapabilities,
-  BulbCommand,
-  BulbState,
-  SensorReading,
-} from "@/types/sensor";
+import { useEffect, useState } from 'react';
+import { Wifi, Battery, Clock, AlertTriangle } from 'lucide-react';
+import type { BulbCapabilities, BulbCommand, BulbState, SensorReading } from '@/types/sensor';
+import {
+  getBatteryColor, getHumidityAdvice, getHumidityEmoji,
+  getRelativeTime, getRoomEmoji, getTempAdvice, getTempColor, getTempEmoji,
+} from '@/lib/sensorHelpers';
+import { BulbControls } from '@/components/BulbControls';
 
 interface Props {
   room: string;
@@ -17,190 +17,40 @@ interface Props {
   onBulbCommand: (command: BulbCommand) => void;
 }
 
-// --- Temperature helpers ---
+export function SensorCard({ room, reading, bulb, bulbCapabilities, onBulbCommand }: Props) {
+  const [relativeTime, setRelativeTime] = useState(() => getRelativeTime(reading.lastUpdated));
 
-function getTempEmoji(t: number): string {
-  if (t < 16) return "❄️";
-  if (t < 19) return "🥶";
-  if (t <= 25) return "😊";
-  if (t <= 28) return "🥵";
-  return "🔥";
-}
-
-function getTempColor(t: number): string {
-  if (t < 16) return "text-blue-500";
-  if (t <= 25) return "text-green-500";
-  if (t <= 28) return "text-yellow-500";
-  return "text-red-500";
-}
-
-function getTempAdvice(t: number): string | null {
-  if (t < 16) return "Too cold — consider turning on heating";
-  if (t > 25 && t <= 28) return "Warm — try opening a window";
-  if (t > 28) return "Too hot — turn on AC or a fan";
-  return null;
-}
-
-// --- Humidity helpers ---
-
-function getHumidityEmoji(h: number): string {
-  if (h < 30) return "🏜️";
-  if (h < 40) return "😐";
-  if (h <= 60) return "😊";
-  if (h <= 70) return "😓";
-  return "💧";
-}
-
-function getHumidityAdvice(h: number): string | null {
-  if (h < 30) return "Very dry air — use a humidifier";
-  if (h < 40) return "Slightly dry — a small humidifier may help";
-  if (h > 70) return "Too humid — use a dehumidifier or open windows";
-  if (h > 60) return "Slightly humid — improve ventilation";
-  return null;
-}
-
-// --- Battery helpers ---
-
-function getBatteryColor(b: number): string {
-  if (b >= 50) return "text-green-500";
-  if (b >= 20) return "text-yellow-500";
-  return "text-red-500";
-}
-
-// --- Relative time ---
-
-function getRelativeTime(isoString: string): string {
-  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
-
-// --- Bulb helpers ---
-
-// Convert zigbee2mqtt brightness (0–254) to display percentage (0–100)
-function brightnessToPercent(b: number): number {
-  return Math.round((b / 254) * 100);
-}
-
-// Convert display percentage (0–100) to zigbee2mqtt brightness (0–254)
-function percentToBrightness(p: number): number {
-  return Math.round((p / 100) * 254);
-}
-
-export function SensorCard({
-  room,
-  reading,
-  bulb,
-  bulbCapabilities,
-  onBulbCommand,
-}: Props) {
-  const [relativeTime, setRelativeTime] = useState(() =>
-    getRelativeTime(reading.lastUpdated),
-  );
-
-  // Optimistic local slider values — updated immediately on drag, sent after debounce
-  const [localBrightness, setLocalBrightness] = useState<number>(
-    bulb ? brightnessToPercent(bulb.brightness) : 100,
-  );
-  const [localColorTemp, setLocalColorTemp] = useState<number>(
-    bulb?.color_temp ?? bulbCapabilities?.minColorTemp ?? 153,
-  );
-
-  const brightnessDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const colorTempDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Sync slider values when MQTT echo-back arrives (only when not actively dragging)
-  const isDraggingBrightness = useRef(false);
-  const isDraggingColorTemp = useRef(false);
-
-  useEffect(() => {
-    if (bulb && !isDraggingBrightness.current) {
-      setLocalBrightness(brightnessToPercent(bulb.brightness));
-    }
-  }, [bulb?.brightness]);
-
-  useEffect(() => {
-    if (bulb?.color_temp != null && !isDraggingColorTemp.current) {
-      setLocalColorTemp(bulb.color_temp);
-    }
-  }, [bulb?.color_temp]);
-
-  // Update relative time every 30 seconds
   useEffect(() => {
     setRelativeTime(getRelativeTime(reading.lastUpdated));
-    const id = setInterval(() => {
-      setRelativeTime(getRelativeTime(reading.lastUpdated));
-    }, 30_000);
+    const id = setInterval(() => setRelativeTime(getRelativeTime(reading.lastUpdated)), 30_000);
     return () => clearInterval(id);
   }, [reading.lastUpdated]);
 
   const tempAdvice = getTempAdvice(reading.temperature);
-  const humidityAdvice =
-    reading.humidity != null ? getHumidityAdvice(reading.humidity) : null;
-  const hasAdvice = tempAdvice !== null || humidityAdvice !== null;
-
-  const signalPct =
-    reading.linkquality != null
-      ? Math.round((reading.linkquality / 255) * 100)
-      : null;
-
-  const isOn = bulb?.state === "ON";
-
-  function handleToggle() {
-    onBulbCommand({ state: isOn ? "OFF" : "ON" });
-  }
-
-  function handleBrightnessChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const pct = Number(e.target.value);
-    setLocalBrightness(pct);
-    isDraggingBrightness.current = true;
-    if (brightnessDebounce.current) clearTimeout(brightnessDebounce.current);
-    brightnessDebounce.current = setTimeout(() => {
-      isDraggingBrightness.current = false;
-      onBulbCommand({ brightness: percentToBrightness(pct) });
-    }, 300);
-  }
-
-  function handleColorTempChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const mireds = Number(e.target.value);
-    setLocalColorTemp(mireds);
-    isDraggingColorTemp.current = true;
-    if (colorTempDebounce.current) clearTimeout(colorTempDebounce.current);
-    colorTempDebounce.current = setTimeout(() => {
-      isDraggingColorTemp.current = false;
-      onBulbCommand({ color_temp: mireds });
-    }, 300);
-  }
+  const humidityAdvice = reading.humidity != null ? getHumidityAdvice(reading.humidity) : null;
+  const signalPct = reading.linkquality != null ? Math.round((reading.linkquality / 255) * 100) : null;
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-md p-5 flex flex-col gap-3 border border-zinc-100 dark:border-zinc-800">
       {/* Room name */}
-      <h2 className="text-base font-semibold text-zinc-700 dark:text-zinc-200 capitalize">
-        {room.replace(/-/g, " ")}
+      <h2 className="flex items-center gap-2 text-base font-semibold text-zinc-700 dark:text-zinc-200 capitalize">
+        <span aria-hidden="true">{getRoomEmoji(room)}</span>
+        {room.replace(/-/g, ' ')}
       </h2>
 
       {/* Primary readings: temperature + humidity */}
       <div className="flex items-center gap-4">
         <div className="flex flex-col items-center">
-          <span className="text-3xl" aria-label="temperature emoji">
-            {getTempEmoji(reading.temperature)}
-          </span>
-          <span
-            className={`text-2xl font-bold tabular-nums ${getTempColor(reading.temperature)}`}
-          >
+          <span className="text-3xl" aria-label="temperature emoji">{getTempEmoji(reading.temperature)}</span>
+          <span className={`text-2xl font-bold tabular-nums ${getTempColor(reading.temperature)}`}>
             {reading.temperature.toFixed(1)}°C
           </span>
         </div>
-
         {reading.humidity != null && (
           <>
             <div className="w-px h-12 bg-zinc-200 dark:bg-zinc-700" />
             <div className="flex flex-col items-center">
-              <span className="text-3xl" aria-label="humidity emoji">
-                {getHumidityEmoji(reading.humidity)}
-              </span>
+              <span className="text-3xl" aria-label="humidity emoji">{getHumidityEmoji(reading.humidity)}</span>
               <span className="text-2xl font-bold tabular-nums text-sky-500">
                 {Math.round(reading.humidity)}%
               </span>
@@ -214,9 +64,7 @@ export function SensorCard({
         {reading.battery != null && (
           <div className="flex items-center gap-1">
             <Battery size={14} className={getBatteryColor(reading.battery)} />
-            <span className={getBatteryColor(reading.battery)}>
-              {reading.battery}%
-            </span>
+            <span className={getBatteryColor(reading.battery)}>{reading.battery}%</span>
           </div>
         )}
         {signalPct != null && (
@@ -233,8 +81,8 @@ export function SensorCard({
         <span>{relativeTime}</span>
       </div>
 
-      {/* Climate advice panel */}
-      {hasAdvice && (
+      {/* Climate advice */}
+      {(tempAdvice || humidityAdvice) && (
         <div className="border-t border-zinc-100 dark:border-zinc-800 pt-2 flex flex-col gap-1">
           {tempAdvice && (
             <div className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
@@ -253,73 +101,11 @@ export function SensorCard({
 
       {/* Bulb controls */}
       {bulb && (
-        <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 flex flex-col gap-3">
-          {/* On/Off toggle */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-300">
-              <Lightbulb
-                size={14}
-                className={isOn ? "text-yellow-400" : "text-zinc-400"}
-              />
-              <span>Light</span>
-            </div>
-            <button
-              onClick={handleToggle}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                isOn ? "bg-yellow-400" : "bg-zinc-300 dark:bg-zinc-600"
-              }`}
-              aria-label={isOn ? "Turn off light" : "Turn on light"}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                  isOn ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Brightness slider — only when ON */}
-          {isOn && (
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                <span>Brightness</span>
-                <span>{localBrightness}%</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={localBrightness}
-                onChange={handleBrightnessChange}
-                className="w-full h-1.5 rounded-full accent-yellow-400 cursor-pointer"
-                aria-label="Brightness"
-              />
-            </div>
-          )}
-
-          {/* Color temperature slider — only when ON and supported */}
-          {isOn && bulbCapabilities && (
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                <span>Cool</span>
-                <span>Warm</span>
-              </div>
-              <input
-                type="range"
-                min={bulbCapabilities.minColorTemp}
-                max={bulbCapabilities.maxColorTemp}
-                value={localColorTemp}
-                onChange={handleColorTempChange}
-                className="w-full h-1.5 rounded-full cursor-pointer"
-                style={{
-                  accentColor: "#f59e0b",
-                  background: `linear-gradient(to right, #bfdbfe, #fef3c7)`,
-                }}
-                aria-label="Color temperature"
-              />
-            </div>
-          )}
-        </div>
+        <BulbControls
+          bulb={bulb}
+          bulbCapabilities={bulbCapabilities}
+          onBulbCommand={onBulbCommand}
+        />
       )}
     </div>
   );

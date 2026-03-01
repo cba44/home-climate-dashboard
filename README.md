@@ -87,14 +87,17 @@ docker compose up -d zigbee-dashboard
 ├── src/
 │   ├── app/                # Next.js App Router pages and global CSS
 │   ├── components/
-│   │   ├── Dashboard.tsx   # Sensor grid (client component)
-│   │   ├── SensorCard.tsx  # Per-room card with readings and climate advice
+│   │   ├── Dashboard.tsx         # Sensor grid (client component)
+│   │   ├── SensorCard.tsx        # Per-room card layout
+│   │   ├── BulbControls.tsx      # Light toggle, brightness & color temp sliders
 │   │   ├── SensorCardSkeleton.tsx
-│   │   └── StatusBar.tsx   # WebSocket connection status
+│   │   └── StatusBar.tsx         # WebSocket connection status
 │   ├── hooks/
-│   │   └── useSensorWebSocket.ts  # WS connection, reconnect, state management
+│   │   └── useSensorWebSocket.ts # WS connection, reconnect, state management
+│   ├── lib/
+│   │   └── sensorHelpers.ts      # Pure helper functions (emojis, colors, advice, time)
 │   └── types/
-│       └── sensor.ts       # Shared TypeScript interfaces
+│       └── sensor.ts             # Shared TypeScript interfaces
 ├── Dockerfile
 └── docker-compose.yml      # Service snippet for Pi integration
 ```
@@ -103,6 +106,7 @@ docker compose up -d zigbee-dashboard
 
 | Indicator      | Details                                                                 |
 | -------------- | ----------------------------------------------------------------------- |
+| Room icon      | Auto-detected emoji per room name (🍳 kitchen · 🛋️ living · 🛏️ bedroom · 🚿 bathroom · and more) |
 | Temperature    | ❄️ <16° · 🥶 16–18.9° · 😊 19–25° · 🥵 25.1–28° · 🔥 >28°               |
 | Humidity       | 🏜️ <30% · 😐 30–39% · 😊 40–60% · 😓 61–70% · 💧 >70%                   |
 | Battery        | Color-coded: green ≥50% · yellow ≥20% · red <20%                        |
