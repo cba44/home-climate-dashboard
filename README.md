@@ -101,15 +101,15 @@ docker compose up -d zigbee-dashboard
 
 ## Sensor Card Features
 
-| Indicator      | Details                                                                |
-| -------------- | ---------------------------------------------------------------------- |
-| Temperature    | ❄️ <16° · 🥶 16–18° · 😊 19–24° · 🥵 25–28° · 🔥 >28°                  |
-| Humidity       | 🏜️ <30% · 😐 30–39% · 😊 40–60% · 😓 61–70% · 💧 >70%                  |
-| Battery        | Color-coded: green ≥50% · yellow ≥20% · red <20%                      |
-| Signal         | LQI as percentage                                                      |
-| Climate advice | Contextual tips shown when temp or humidity is out of range            |
-| Light on/off   | Toggle switch per room (shown when a `bulb-{room}` is paired)          |
-| Brightness     | Slider 0–100% (shown when the light is on)                             |
+| Indicator      | Details                                                                 |
+| -------------- | ----------------------------------------------------------------------- |
+| Temperature    | ❄️ <16° · 🥶 16–18.9° · 😊 19–25° · 🥵 25.1–28° · 🔥 >28°               |
+| Humidity       | 🏜️ <30% · 😐 30–39% · 😊 40–60% · 😓 61–70% · 💧 >70%                   |
+| Battery        | Color-coded: green ≥50% · yellow ≥20% · red <20%                        |
+| Signal         | LQI as percentage                                                       |
+| Climate advice | Contextual tips shown when temp or humidity is out of range             |
+| Light on/off   | Toggle switch per room (shown when a `bulb-{room}` is paired)           |
+| Brightness     | Slider 0–100% (shown when the light is on)                              |
 | Color temp     | Cool → warm slider (shown only on bulbs that support color temperature) |
 
 ## Configuration

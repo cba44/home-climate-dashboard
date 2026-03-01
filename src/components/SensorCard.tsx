@@ -22,21 +22,21 @@ interface Props {
 function getTempEmoji(t: number): string {
   if (t < 16) return "❄️";
   if (t < 19) return "🥶";
-  if (t <= 24) return "😊";
+  if (t <= 25) return "😊";
   if (t <= 28) return "🥵";
   return "🔥";
 }
 
 function getTempColor(t: number): string {
   if (t < 16) return "text-blue-500";
-  if (t <= 24) return "text-green-500";
+  if (t <= 25) return "text-green-500";
   if (t <= 28) return "text-yellow-500";
   return "text-red-500";
 }
 
 function getTempAdvice(t: number): string | null {
   if (t < 16) return "Too cold — consider turning on heating";
-  if (t >= 25 && t <= 28) return "Warm — try opening a window";
+  if (t > 25 && t <= 28) return "Warm — try opening a window";
   if (t > 28) return "Too hot — turn on AC or a fan";
   return null;
 }
