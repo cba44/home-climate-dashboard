@@ -4,6 +4,7 @@ const http = require('http');
 const next = require('next');
 const WebSocket = require('ws');
 const mqtt = require('mqtt');
+const { sendNotification } = require('./notifications');
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -24,6 +25,79 @@ const bulbCapabilities = new Map();
 
 // Set of connected WebSocket clients
 const clients = new Set();
+
+// ---------------------------------------------------------------------------
+// Advice-category tracking for notifications
+// ---------------------------------------------------------------------------
+
+// Returns a stable key for the temperature advice category, or null if comfortable
+function getTempAdviceKey(t) {
+  if (t < 16) return 'too-cold';
+  if (t < 19) return 'chilly';
+  if (t > 28) return 'too-hot';
+  if (t > 25) return 'warm';
+  return null;
+}
+
+// Returns a stable key for the humidity advice category, or null if comfortable
+function getHumidityAdviceKey(h) {
+  if (h < 30) return 'very-dry';
+  if (h < 40) return 'slightly-dry';
+  if (h > 70) return 'too-humid';
+  if (h > 60) return 'slightly-humid';
+  return null;
+}
+
+const TEMP_ADVICE = {
+  'too-cold': 'Very cold — turn on heating',
+  'chilly':   'Chilly — consider turning on heating',
+  'warm':     'Warm — try opening a window',
+  'too-hot':  'Too hot — turn on AC or a fan',
+};
+
+const HUMIDITY_ADVICE = {
+  'very-dry':      'Very dry air — use a humidifier',
+  'slightly-dry':  'Slightly dry — a small humidifier may help',
+  'slightly-humid':'Slightly humid — improve ventilation',
+  'too-humid':     'Too humid — use a dehumidifier or open windows',
+};
+
+// Tracks previous advice keys per device: Map<device, { temp, humidity }>
+// Values start as `undefined` so we skip notifications on the very first reading.
+const prevAdviceKeys = new Map();
+
+// Converts "climate-living-room" → "Living Room"
+function deviceToRoomName(device) {
+  return device
+    .replace(/^climate-/, '')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function checkAndNotify(device, reading) {
+  const prev = prevAdviceKeys.get(device) || { temp: undefined, humidity: undefined };
+
+  const newTemp = getTempAdviceKey(reading.temperature);
+  const newHum  = reading.humidity !== null ? getHumidityAdviceKey(reading.humidity) : undefined;
+
+  const roomName = deviceToRoomName(device);
+
+  // Temperature — skip first reading (prev.temp === undefined)
+  if (prev.temp !== undefined && newTemp !== prev.temp) {
+    const title = `${roomName} temperature`;
+    const body  = newTemp === null ? 'Back to a comfortable range' : TEMP_ADVICE[newTemp];
+    sendNotification(title, body, newTemp === null).catch((err) => console.error('[notify] unexpected error:', err));
+  }
+
+  // Humidity — skip first reading (prev.humidity === undefined) and when humidity is absent
+  if (newHum !== undefined && prev.humidity !== undefined && newHum !== prev.humidity) {
+    const title = `${roomName} humidity`;
+    const body  = newHum === null ? 'Back to a comfortable range' : HUMIDITY_ADVICE[newHum];
+    sendNotification(title, body, newHum === null).catch((err) => console.error('[notify] unexpected error:', err));
+  }
+
+  prevAdviceKeys.set(device, { temp: newTemp, humidity: newHum });
+}
 
 function broadcast(message) {
   const payload = JSON.stringify(message);
@@ -167,6 +241,7 @@ app.prepare().then(() => {
         };
         sensorCache.set(device, reading);
         broadcast({ type: 'update', room: device, data: reading });
+        checkAndNotify(device, reading);
       }
     } catch (err) {
       console.warn('[MQTT] failed to parse message on topic', topic, err.message);

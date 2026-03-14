@@ -10,13 +10,15 @@ export function getTempEmoji(t: number): string {
 
 export function getTempColor(t: number): string {
   if (t < 16) return 'text-blue-500';
+  if (t < 19) return 'text-blue-400';
   if (t <= 25) return 'text-green-500';
   if (t <= 28) return 'text-yellow-500';
   return 'text-red-500';
 }
 
 export function getTempAdvice(t: number): string | null {
-  if (t < 16) return 'Too cold — consider turning on heating';
+  if (t < 16) return 'Very cold — turn on heating';
+  if (t < 19) return 'Chilly — consider turning on heating';
   if (t > 25 && t <= 28) return 'Warm — try opening a window';
   if (t > 28) return 'Too hot — turn on AC or a fan';
   return null;
