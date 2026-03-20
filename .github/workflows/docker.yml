@@ -1,3 +1,10 @@
+# ─── Required GitHub Actions secrets ────────────────────────────────────────
+# GITHUB_TOKEN — provided automatically by Actions; used to push to GHCR.
+#
+# No other secrets needed in CI. All VAPID and MQTT vars are runtime secrets
+# set in docker-compose.yml on the Pi — the Docker image is built without them.
+# ─────────────────────────────────────────────────────────────────────────────
+
 name: Build and Push to GHCR
 
 on:

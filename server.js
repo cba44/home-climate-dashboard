@@ -4,7 +4,7 @@ const http = require('http');
 const next = require('next');
 const WebSocket = require('ws');
 const mqtt = require('mqtt');
-const { sendNotification } = require('./notifications');
+const { sendNotification, pushSubscriptions, sendTestPush } = require('./notifications');
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -110,6 +110,55 @@ function broadcast(message) {
 
 app.prepare().then(() => {
   const httpServer = http.createServer((req, res) => {
+    const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+
+    if (pathname === '/api/test-push' && req.method === 'POST') {
+      if (process.env.NODE_ENV === 'production') {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not available in production' }));
+        return;
+      }
+      sendTestPush()
+        .then(() => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, subscribers: pushSubscriptions.size }));
+        })
+        .catch((err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+      return;
+    }
+
+    if (pathname === '/api/vapid-public-key' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ publicKey: process.env.VAPID_PUBLIC_KEY ?? null }));
+      return;
+    }
+
+    if (pathname === '/api/push-subscribe' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const subscription = JSON.parse(body);
+          if (!subscription.endpoint || !subscription.keys) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid subscription' }));
+            return;
+          }
+          pushSubscriptions.set(subscription.endpoint, subscription);
+          console.log(`[push] subscription registered — total: ${pushSubscriptions.size}`);
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Bad JSON' }));
+        }
+      });
+      return;
+    }
+
     handle(req, res);
   });
 

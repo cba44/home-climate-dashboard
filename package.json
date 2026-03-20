@@ -5,16 +5,19 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local server.js",
     "build": "next build",
+    "preview": "npm run build && cross-env NODE_ENV=production node --env-file-if-exists=.env.local server.js",
     "start": "node server.js",
     "lint": "next lint"
   },
   "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
     "clsx": "^2.1.1",
     "lucide-react": "^0.475.0",
     "mqtt": "^5.10.4",
     "next": "^15.1.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "web-push": "^3.6.7",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -22,7 +25,9 @@
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.14",
+    "cross-env": "^10.1.0",
     "eslint": "^9.20.0",
     "eslint-config-next": "^15.1.7",
     "tailwindcss": "^4.0.6",

@@ -1,12 +1,14 @@
 'use client';
 
 import { useSensorWebSocket } from '@/hooks/useSensorWebSocket';
+import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { SensorCard } from '@/components/SensorCard';
 import { SensorCardSkeleton } from '@/components/SensorCardSkeleton';
 import { StatusBar } from '@/components/StatusBar';
 
 export function Dashboard() {
   const { sensors, bulbs, capabilities, status, sendBulbCommand } = useSensorWebSocket();
+  usePushSubscription();
 
   const sortedRooms = Object.entries(sensors).sort(([a], [b]) =>
     a.localeCompare(b)

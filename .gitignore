@@ -5,6 +5,12 @@ node_modules/
 .next/
 out/
 
+# next-pwa generated service worker files
+/public/sw.js
+/public/workbox-*.js
+/public/sw.js.map
+/public/workbox-*.js.map
+
 # Environment files (contain secrets)
 .env.local
 .env*.local

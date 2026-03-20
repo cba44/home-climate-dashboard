@@ -1,6 +1,6 @@
-# Home Climate Dashboard
+# Zigbee Dashboard
 
-Live temperature, humidity, and light control dashboard for your home, powered by Zigbee sensors, IKEA bulbs, MQTT, and Next.js.
+Live temperature, humidity, and light control dashboard for your home — powered by Zigbee sensors, IKEA bulbs, MQTT, and Next.js. Installable as a PWA with Web Push notifications.
 
 ## Overview
 
@@ -14,6 +14,8 @@ IKEA bulbs             ↗                                           ↘ control
 - Bulb capabilities (color temperature support) auto-detected from zigbee2mqtt — no hardcoding
 - A custom Node.js server bridges MQTT to the browser over WebSocket (port 3000)
 - No database — live readings only, held in memory
+- Installable as a PWA (Chrome/Edge install prompt; iOS via Share → Add to Home Screen)
+- Web Push notifications — alerts delivered to your device even when the app is closed
 
 ## Prerequisites
 
@@ -43,6 +45,44 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). The app connects to the Pi's live MQTT broker — no mocking needed.
 
+**3. (Optional) Enable Web Push**
+
+Generate VAPID keys once and add them to `.env.local`:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Copy the output into `.env.local` — see `.env.example` for the full list of keys.
+
+## Testing PWA Locally
+
+PWA features (service worker, install prompt, Web Push) require a **production build** — they are disabled in `npm run dev`. Use the `preview` script to build and run production locally in one command:
+
+```bash
+npm run preview
+```
+
+This runs `npm run build` then starts the server at `http://localhost:3000` with `.env.local` loaded and `NODE_ENV=production`.
+
+**Step-by-step checklist in Chrome:**
+
+1. Open `http://localhost:3000`
+2. **DevTools → Application → Service Workers** — verify the SW is active and scope is `/`
+3. **DevTools → Application → Manifest** — verify name, icons, and theme color load correctly
+4. An install icon appears in the address bar — click it to install the app in a standalone window
+5. Grant notification permission when prompted (or via DevTools → Application → Notifications)
+6. Send a test push — no MQTT event needed:
+
+```bash
+curl -X POST http://localhost:3000/api/test-push
+# {"ok":true,"subscribers":1}
+```
+
+A notification titled "Test notification" should arrive on your device. If the app window is open, put it in the background or close it first to see the system notification.
+
+> `POST /api/test-push` is blocked with HTTP 403 in production — it is safe to leave in the codebase.
+
 ## Deploy to Raspberry Pi
 
 **1. Build the Docker image on the Pi**
@@ -57,20 +97,27 @@ docker build -t zigbee-dashboard:latest .
 
 ```yaml
 zigbee-dashboard:
-  image: zigbee-dashboard:latest
+  image: ghcr.io/<your-username>/<your-repo>:latest
   container_name: zigbee-dashboard
   restart: unless-stopped
   ports:
     - "3000:3000"
   environment:
-    - MQTT_HOST=mosquitto # Docker service name (if on the same network)
+    - MQTT_HOST=mosquitto     # Docker service name (if on the same network)
     - MQTT_PORT=1883
     - NODE_ENV=production
+    - VAPID_PUBLIC_KEY=<your-public-key>
+    - VAPID_PRIVATE_KEY=<your-private-key>
+    - VAPID_SUBJECT=mailto:you@example.com
   depends_on:
     - mosquitto
 ```
 
 > If your containers use host networking, set `network_mode: host` and `MQTT_HOST=localhost` instead.
+
+**GitHub Actions (CI/CD to GHCR)**
+
+No secrets are needed in CI. The Docker image is built without any VAPID keys — they are injected at runtime via `docker-compose.yml` on the Pi. Only `GITHUB_TOKEN` (provided automatically) is required.
 
 **3. Start the service**
 
@@ -83,24 +130,30 @@ docker compose up -d zigbee-dashboard
 ## Project Structure
 
 ```
-├── server.js               # MQTT subscriber + WebSocket server + Next.js HTTP server
-├── notifications.js        # Push notification dispatch (ntfy / Telegram / Discord)
+├── public/
+│   ├── manifest.json           # Web App Manifest (PWA)
+│   └── icons/                  # App icons (192×192, 512×512)
+├── server.js                   # MQTT subscriber + WebSocket server + Next.js HTTP server
+├── notifications.js            # Push notification dispatch (ntfy / Telegram / Discord / Web Push)
 ├── src/
-│   ├── app/                # Next.js App Router pages and global CSS
+│   ├── app/                    # Next.js App Router pages and global CSS
 │   ├── components/
-│   │   ├── Dashboard.tsx         # Sensor grid (client component)
-│   │   ├── SensorCard.tsx        # Per-room card layout
-│   │   ├── BulbControls.tsx      # Light toggle, brightness & color temp sliders
+│   │   ├── Dashboard.tsx             # Sensor grid (client component)
+│   │   ├── SensorCard.tsx            # Per-room card layout
+│   │   ├── BulbControls.tsx          # Light toggle, brightness & color temp sliders
 │   │   ├── SensorCardSkeleton.tsx
-│   │   └── StatusBar.tsx         # WebSocket connection status
+│   │   └── StatusBar.tsx             # WebSocket connection status
 │   ├── hooks/
-│   │   └── useSensorWebSocket.ts # WS connection, reconnect, state management
+│   │   ├── useSensorWebSocket.ts     # WS connection, reconnect, state management
+│   │   └── usePushSubscription.ts    # Browser push subscription + permission prompt
 │   ├── lib/
-│   │   └── sensorHelpers.ts      # Pure helper functions (emojis, colors, advice, time)
-│   └── types/
-│       └── sensor.ts             # Shared TypeScript interfaces
+│   │   └── sensorHelpers.ts          # Pure helper functions (emojis, colors, advice, time)
+│   ├── types/
+│   │   └── sensor.ts                 # Shared TypeScript interfaces
+│   └── worker/
+│       └── index.ts                  # Custom service worker (push + notificationclick events)
 ├── Dockerfile
-└── docker-compose.yml      # Service snippet for Pi integration
+└── docker-compose.yml          # Service snippet for Pi integration
 ```
 
 ## Sensor Card Features
@@ -135,6 +188,9 @@ docker compose up -d zigbee-dashboard
 | `TELEGRAM_CHAT_ID`    | —                 | Chat or group ID to send messages to                    |
 | `DISCORD_ENABLED`     | `false`           | Set to `true` to enable Discord notifications           |
 | `DISCORD_WEBHOOK_URL` | —                 | Discord channel webhook URL                             |
+| `VAPID_PUBLIC_KEY` | — | Web Push VAPID public key — signs push messages server-side; served to the browser at runtime via `GET /api/vapid-public-key` |
+| `VAPID_PRIVATE_KEY` | — | Web Push VAPID private key — keep secret, never commit |
+| `VAPID_SUBJECT` | `mailto:admin@example.com` | Contact URI sent with each push request |
 
 ## Notifications
 
@@ -170,3 +226,44 @@ Notifications are silenced on the very first reading after server start, so a re
 - **Discord** — requires a channel webhook URL
 
 All services are independent: a failure in one does not silence the others.
+
+## PWA & Web Push
+
+### Installing the app
+
+The dashboard is a Progressive Web App. Once served over HTTPS (or `localhost`):
+
+- **Chrome / Edge (desktop & Android)** — an install icon appears in the address bar. Click it to install the app in a standalone window.
+- **iOS 16.4+** — tap the Share button in Safari, then **Add to Home Screen**. Push notifications require the installed app (not the Safari browser tab).
+
+### Web Push notifications
+
+When the app loads, the browser asks for notification permission. On approval:
+
+1. The browser registers a push subscription using the VAPID public key
+2. The subscription is sent to the server (`POST /api/push-subscribe`) and held in memory
+3. Whenever a climate alert fires (same thresholds as ntfy/Telegram/Discord), a push notification is delivered to the device — even when the app is closed
+
+Push notifications are sent **in parallel** with all other enabled notification services.
+
+### VAPID key setup
+
+Generate a key pair once (per deployment):
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+| Key | Where to set it |
+|---|---|
+| Public key | `.env.local` as `VAPID_PUBLIC_KEY`; docker-compose env — the server serves it to the browser at runtime, no build step needed |
+| Private key | `.env.local` and docker-compose env only — never in CI |
+
+### Subscription persistence
+
+Subscriptions are stored in memory. After a server restart, users automatically re-subscribe the next time they load the page (the browser retains its push subscription endpoint; no permission prompt is shown again).
+
+### iOS notes
+
+- Push notifications require iOS 16.4+ and the app must be installed via Add to Home Screen
+- iOS does not show an automatic install banner — users must use the Share menu manually

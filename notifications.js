@@ -11,6 +11,21 @@ const ntfyEnabled    = process.env.NTFY_ENABLED     === 'true';
 const telegramEnabled = process.env.TELEGRAM_ENABLED === 'true';
 const discordEnabled  = process.env.DISCORD_ENABLED  === 'true';
 
+// Web Push
+const webpush = require('web-push');
+const webPushEnabled = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+if (webPushEnabled) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:admin@example.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
+
+// In-memory push subscription store — keyed by endpoint URL to prevent duplicates.
+// Exported so server.js can register subscriptions.
+const pushSubscriptions = new Map();
+
 // ntfy
 const ntfyBaseUrl          = (process.env.NTFY_URL || 'https://ntfy.sh').replace(/\/$/, '');
 const ntfyTopic            = process.env.NTFY_TOPIC;
@@ -66,6 +81,26 @@ async function sendTelegram(title, body) {
   }
 }
 
+async function sendWebPush(title, body) {
+  if (pushSubscriptions.size === 0) return;
+  const payload = JSON.stringify({ title, body });
+  const stale = [];
+  await Promise.allSettled(
+    [...pushSubscriptions.values()].map(async (subscription) => {
+      try {
+        await webpush.sendNotification(subscription, payload);
+      } catch (err) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          stale.push(subscription.endpoint);
+        } else {
+          console.error('[notify] web-push error:', err.message);
+        }
+      }
+    })
+  );
+  for (const endpoint of stale) pushSubscriptions.delete(endpoint);
+}
+
 async function sendDiscord(title, body) {
   if (!discordWebhookUrl) {
     console.warn('[notify] Discord is enabled but DISCORD_WEBHOOK_URL is not set — skipping');
@@ -99,6 +134,7 @@ async function sendNotification(title, body, isRecovery = false) {
   if (ntfyEnabled)     tasks.push(sendNtfy(title, body, ntfyPriority));
   if (telegramEnabled) tasks.push(sendTelegram(title, body));
   if (discordEnabled)  tasks.push(sendDiscord(title, body));
+  if (webPushEnabled)  tasks.push(sendWebPush(title, body));
   if (tasks.length === 0) return;
 
   const results = await Promise.allSettled(tasks);
@@ -109,4 +145,8 @@ async function sendNotification(title, body, isRecovery = false) {
   }
 }
 
-module.exports = { sendNotification };
+async function sendTestPush() {
+  return sendWebPush('Test notification', 'Push is working correctly');
+}
+
+module.exports = { sendNotification, pushSubscriptions, sendTestPush };
